@@ -1,0 +1,5 @@
+[
+  { "Date": "2026-07-18T01:00:00", "MonetaryValue": 0.02, "Key": "12:00\nam|1:00\nam", "LitreValue": 4, "ReadingType": 1, "Status": null },
+  { "Date": "2026-07-18T02:00:00", "MonetaryValue": 0.04, "Key": "1:00\nam|2:00\nam", "LitreValue": 9, "ReadingType": 1, "Status": null },
+  { "Date": "2026-07-18T06:00:00", "MonetaryValue": 0.02, "Key": "5:00\nam|6:00\nam", "LitreValue": 5, "ReadingType": 0, "Status": null }
+]

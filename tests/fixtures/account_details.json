@@ -1,0 +1,29 @@
+{
+  "AccountDetail": {
+    "Account": {
+      "SmartMeter": true,
+      "SmartMeterSpecified": true,
+      "StartDate": "2017-01-30T00:00:00",
+      "StartDateSpecified": true,
+      "NumberOfOccupiers": 4,
+      "LastBillAmount": 100.00
+    },
+    "Meters": [
+      {
+        "BadgeNumber": "TESTMETER01",
+        "MeterLocation": "*C1",
+        "NumberDials": 5,
+        "LastRead": "231.000000",
+        "LastReadDate": "2026-07-14T00:00:00",
+        "LastActualRead": "231.000000",
+        "smartPoint": "00000000",
+        "smartStatus": "COMM",
+        "meterInstalledDate": "2024-03-20T00:00:00"
+      }
+    ],
+    "Premise": { "PropertyAddress": "REDACTED", "Measured": true },
+    "AccountId": "1000000000",
+    "PersonId": "PersonId",
+    "PremiseId": "2000000000"
+  }
+}
