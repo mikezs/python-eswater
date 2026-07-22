@@ -1,0 +1,14 @@
+{
+  "Message": "",
+  "Accounts": [
+    {
+      "AccountID": "3799250100",
+      "PremiseID": "1126750100",
+      "PropertyAddress": "REDACTED",
+      "AccountType": 1,
+      "AccountBalance": -27.19,
+      "MultiplePremises": false
+    }
+  ],
+  "Status": { "Code": "0", "Message": "<p>Success</p>" }
+}
