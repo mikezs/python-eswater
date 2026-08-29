@@ -23,6 +23,7 @@ import aiohttp
 from .const import (
     ACCOUNT_DETAILS_PATH,
     ACCOUNT_SUMMARY_PATH,
+    ADD_OR_UPDATE_SESSION_PATH,
     BASE_URL,
     DEFAULT_TIMEOUT,
     JWT_EXPIRY_MARGIN,
@@ -216,8 +217,17 @@ class ESWaterClient:
             "GET", ACCOUNT_SUMMARY_PATH, params={"personId": "PersonId"}
         )
         try:
-            accounts = [Account.from_summary(a) for a in summary.get("Accounts", [])]
+            accounts = [Account.from_summary(a) for a in summary.get("Accounts") or []]
             for account in accounts:
+                # The portal session is bound to a single account at a time
+                # (GetAccountSummary bound it during authenticate()); re-bind
+                # before each GetAccountDetails call or the response comes
+                # back with null Account/Meters fields for any other account.
+                await self._request(
+                    "POST",
+                    ADD_OR_UPDATE_SESSION_PATH,
+                    json_body=["PersonId:PersonId", f"AccountId:{account.account_id}"],
+                )
                 detail = await self._request(
                     "POST",
                     ACCOUNT_DETAILS_PATH,
@@ -227,7 +237,7 @@ class ESWaterClient:
                         "PersonId": "PersonId",
                     },
                 )
-                account.apply_details(detail.get("AccountDetail", {}))
+                account.apply_details(detail.get("AccountDetail") or {})
         except (KeyError, ValueError, TypeError, AttributeError) as err:
             raise ApiError(f"Could not parse account response: {err}") from err
         return accounts
@@ -301,7 +311,7 @@ class ESWaterClient:
         path: str,
         *,
         params: dict[str, Any] | None = None,
-        json_body: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | list[Any] | None = None,
         parse_json: bool = True,
     ) -> Any:
         """Make a cookie-authenticated request and map errors to exceptions.

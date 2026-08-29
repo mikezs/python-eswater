@@ -16,6 +16,7 @@ LOGIN_PATH = "/api/Auth/Login"
 SAVE_USER_PROFILE_PATH = "/api/Auth/SaveUserProfile"
 ACCOUNT_SUMMARY_PATH = "/api/Customer/GetAccountSummary"
 ACCOUNT_DETAILS_PATH = "/api/Customer/GetAccountDetails"
+ADD_OR_UPDATE_SESSION_PATH = "/api/Customer/AddOrUpdateCustomerSession"
 SMART_AUTH_TOKEN_PATH = "/api/Customer/GetSmartAuthToken"
 
 # Usage endpoints keyed by granularity value (see models.Granularity).

@@ -225,6 +225,8 @@ async def test_get_accounts_parses(client: ESWaterClient) -> None:
     async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
         if "GetAccountSummary" in path:
             return summary
+        if "AddOrUpdateCustomerSession" in path:
+            return True
         if "GetAccountDetails" in path:
             assert kwargs["json_body"]["AccountId"] == "3799250100"
             return details
@@ -251,6 +253,58 @@ async def test_get_accounts_iterates_multiple(client: ESWaterClient) -> None:
     client._request = fake_request  # type: ignore[method-assign]  # noqa: SLF001
     accounts = await client.get_accounts()
     assert [a.account_id for a in accounts] == ["1", "2"]
+
+
+async def test_get_accounts_selects_session_before_each_details_call(
+    client: ESWaterClient,
+) -> None:
+    """Each account must be (re)selected via AddOrUpdateCustomerSession before
+    GetAccountDetails is called for it, or the portal scopes the response to
+    whichever account is still bound and returns null Account/Meters fields.
+    """
+    summary = {
+        "Accounts": [
+            {"AccountID": "1", "PremiseID": "10"},
+            {"AccountID": "2", "PremiseID": "20"},
+        ]
+    }
+    real_details = {
+        "1": {
+            "AccountDetail": {
+                "Account": {"SmartMeter": True, "NumberOfOccupiers": 2},
+                "Meters": [{"BadgeNumber": "SERIAL-1"}],
+            }
+        },
+        "2": {
+            "AccountDetail": {
+                "Account": {"SmartMeter": False, "NumberOfOccupiers": 3},
+                "Meters": [{"BadgeNumber": "SERIAL-2"}],
+            }
+        },
+    }
+    null_details = {"AccountDetail": {"Account": {}, "Meters": None}}
+    selected = ["1"]  # GetAccountSummary bound account "1" at login
+
+    async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
+        if "GetAccountSummary" in path:
+            return summary
+        if "AddOrUpdateCustomerSession" in path:
+            body = kwargs["json_body"]
+            assert body[0] == "PersonId:PersonId"
+            selected[0] = body[1].split(":", 1)[1]
+            return True
+        if "GetAccountDetails" in path:
+            account_id = kwargs["json_body"]["AccountId"]
+            return real_details[account_id] if account_id == selected[0] else null_details
+        raise AssertionError(path)
+
+    client._request = fake_request  # type: ignore[method-assign]  # noqa: SLF001
+    accounts = await client.get_accounts()
+
+    assert accounts[0].meters[0].serial == "SERIAL-1"
+    assert accounts[1].is_smart is False
+    assert accounts[1].num_occupiers == 3
+    assert accounts[1].meters[0].serial == "SERIAL-2"
 
 
 async def test_get_usage_builds_body_and_parses(client: ESWaterClient) -> None:
