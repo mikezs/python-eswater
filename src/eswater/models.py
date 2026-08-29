@@ -87,13 +87,13 @@ class Account:
 
     def apply_details(self, detail: dict[str, Any]) -> None:
         """Enrich with GetAccountDetails (smart flag, start date, meters)."""
-        account = detail.get("Account", {})
+        account = detail.get("Account") or {}
         self.is_smart = bool(account.get("SmartMeter", False))
         self.start_date = _parse_dt(account.get("StartDate"))
         self.num_occupiers = account.get("NumberOfOccupiers")
         self.meters = [
             Meter.from_api(m, account_id=self.account_id, premise_id=self.premise_id)
-            for m in detail.get("Meters", [])
+            for m in detail.get("Meters") or []
         ]
 
 
