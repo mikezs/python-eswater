@@ -368,6 +368,54 @@ async def test_ensure_token_reauthenticates_when_profile_expired(
     assert reauth == [True]
 
 
+async def test_ensure_token_falls_back_to_full_reauth_when_refresh_fails(
+    client: ESWaterClient,
+) -> None:
+    """A failing token refresh (e.g. a desynced/stale rotating refresh
+    token) falls back to a full re-login instead of surfacing the failure.
+    """
+    client._jwt = None  # noqa: SLF001 - force a refresh attempt
+    reauthed: list[bool] = []
+
+    async def fake_refresh() -> None:
+        raise ApiError("GetSmartAuthToken returned no Id_token.")
+
+    async def fake_authenticate() -> None:
+        reauthed.append(True)
+        client._jwt = "new-jwt"  # noqa: SLF001
+        client._jwt_expiry = datetime.now(UTC) + timedelta(minutes=10)  # noqa: SLF001
+
+    async def fake_request(*_a: Any, **_k: Any) -> Any:
+        return []
+
+    client._do_refresh_token = fake_refresh  # type: ignore[method-assign]  # noqa: SLF001
+    client._do_authenticate = fake_authenticate  # type: ignore[method-assign]  # noqa: SLF001
+    client._request = fake_request  # type: ignore[method-assign]  # noqa: SLF001
+    await client.get_usage("acc", "serial", datetime(2026, 7, 18))
+    assert reauthed == [True]
+    assert client._jwt == "new-jwt"  # noqa: SLF001
+
+
+async def test_ensure_token_does_not_fallback_on_service_unavailable(
+    client: ESWaterClient,
+) -> None:
+    """A transient/network failure propagates instead of triggering an
+    immediate duplicate full-login attempt.
+    """
+    client._jwt = None  # noqa: SLF001 - force a refresh attempt
+
+    async def fake_refresh() -> None:
+        raise ServiceUnavailable("Request timed out.")
+
+    async def fake_authenticate() -> None:
+        raise AssertionError("should not fall back to full re-auth on transient errors")
+
+    client._do_refresh_token = fake_refresh  # type: ignore[method-assign]  # noqa: SLF001
+    client._do_authenticate = fake_authenticate  # type: ignore[method-assign]  # noqa: SLF001
+    with pytest.raises(ServiceUnavailable):
+        await client.get_usage("acc", "serial", datetime(2026, 7, 18))
+
+
 # --- convenience + latest --------------------------------------------------
 
 
