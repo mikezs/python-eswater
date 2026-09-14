@@ -204,7 +204,14 @@ class ESWaterClient:
             if self._jwt is None or (
                 self._jwt_expiry and _expired(self._jwt_expiry, margin=JWT_EXPIRY_MARGIN)
             ):
-                await self._do_refresh_token()
+                try:
+                    await self._do_refresh_token()
+                except (ApiError, InvalidAuth, NotAuthenticated):
+                    # The rotating refresh token can desync/go stale
+                    # independently of the broader session; fall back to a
+                    # full re-login rather than surfacing a failure a fresh
+                    # authenticate() would recover from.
+                    await self._do_authenticate()
 
     # -- data endpoints -------------------------------------------------------
 
