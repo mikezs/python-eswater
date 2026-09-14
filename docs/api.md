@@ -121,7 +121,7 @@ Response: `true`.
 > The portal session holds exactly one "current" account at a time (bound to
 > whichever account `GetAccountSummary` last saw, i.e. the first one after
 > login). For a person with multiple accounts, `GetAccountDetails` scopes its
-> `Account`/`Meters` fields to whatever account is currently selected — call
+> `Account`/`Meters` fields to whatever account is currently selected. Call
 > this immediately before each `GetAccountDetails` to re-bind first, or every
 > account after the first comes back with those fields `null`.
 
@@ -235,7 +235,7 @@ Observed windowing behaviour:
 `AddOrUpdateCustomerSession`'s order relative to the token doesn't matter for
 auth; only steps 2 and 3 must precede step 4. But it does matter relative to
 `GetAccountDetails`: it must immediately precede each call, per account (see
-above) — otherwise only the account bound by step 3 returns real data.
+above). Otherwise only the account bound by step 3 returns real data.
 
 ## Gotchas
 - Cloudflare + reCAPTCHA sit on the **login page**; the LoginRadius API login
