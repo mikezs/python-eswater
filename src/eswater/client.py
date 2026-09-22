@@ -3,7 +3,7 @@
 Auth is session based (see docs/api.md):
   1. POST /api/Auth/Login {email, password} -> sets the .AspNetCore.Session cookie
      and returns ``Response.refresh_token`` / ``expires_in`` in the body
-  2. POST /api/Customer/GetSmartAuthToken {refresh_Token} -> short-lived JWT
+  2. POST /api/Customer/GetSmartAuthToken {access_Token} -> short-lived JWT
   3. usage calls send the JWT in the request *body* (``Authorization``) + cookies
 """
 
@@ -88,6 +88,9 @@ class ESWaterClient:
 
         self._authenticated = False
         self._refresh_token: str | None = None
+        # Seed for GetSmartAuthToken: the login response's ``access_token``,
+        # reusable for the life of the session (see docs/api.md).
+        self._access_token: str | None = None
         self._profile_expiry: datetime | None = None
         self._jwt: str | None = None
         self._jwt_expiry: datetime | None = None
@@ -114,9 +117,10 @@ class ESWaterClient:
     async def authenticate(self) -> None:
         """Log in, establishing the session cookie and fetching the first JWT.
 
-        The login response carries the LoginRadius ``refresh_token`` in its body
-        (``Response.refresh_token``); the ``.AspNetCore.Session`` cookie set
-        alongside it authenticates subsequent calls via the session cookie jar.
+        The login response carries the LoginRadius ``access_token`` in its body
+        (``Response.access_token``) — the seed GetSmartAuthToken accepts for the
+        smart JWT; the ``.AspNetCore.Session`` cookie set alongside it
+        authenticates subsequent calls via the session cookie jar.
         The profile must then be registered in the session via
         ``SaveUserProfile`` (else ``GetAccountSummary`` fails "PersonId is
         required"), and ``GetAccountSummary`` must be called before the smart
@@ -145,8 +149,9 @@ class ESWaterClient:
             raise InvalidAuth("Login failed (check credentials).")
 
         self._refresh_token = response.get("refresh_token")
-        if not self._refresh_token:
-            raise InvalidAuth("Login succeeded but no refresh_token in response.")
+        self._access_token = response.get("access_token")
+        if not self._access_token:
+            raise InvalidAuth("Login succeeded but no access_token in response.")
 
         # Register the profile, then establish account context in the session.
         # Both are prerequisites for a smart token that the usage endpoints accept.
@@ -161,32 +166,34 @@ class ESWaterClient:
         await self._do_refresh_token()
 
     async def refresh(self) -> None:
-        """Exchange the current ``refresh_token`` for a fresh smart-usage JWT.
+        """Fetch a fresh smart-usage JWT, re-seeding from the login access token.
 
-        The smart-auth refresh token is single-use and rotates on each call, so
-        the returned ``Refresh_token`` is stored for the next refresh. Usually
-        called automatically; exposed for manual control.
+        Usually called automatically; exposed for manual control.
         """
         async with self._auth_lock:
             await self._do_refresh_token()
 
     async def _do_refresh_token(self) -> None:
-        """Fetch a fresh smart JWT. Caller must hold ``self._auth_lock``."""
-        if not self._refresh_token:
+        """Fetch a fresh smart JWT. Caller must hold ``self._auth_lock``.
+
+        Seeded with the login ``access_token`` (sent as ``access_Token``), which
+        the portal accepts repeatedly for the life of the session. The smart
+        response also carries a ``Refresh_token``, but the portal no longer
+        accepts it for a subsequent refresh, so we always re-seed from the
+        stored login access token instead of rotating.
+        """
+        if not self._access_token:
             raise NotAuthenticated("Not authenticated; call authenticate() first.")
         data = await self._request(
             "POST",
             SMART_AUTH_TOKEN_PATH,
-            json_body={"refresh_Token": self._refresh_token},
+            json_body={"access_Token": self._access_token},
         )
         token = data.get("Id_token") if isinstance(data, dict) else None
         if not token:
             raise ApiError("GetSmartAuthToken returned no Id_token.")
         self._jwt = token
         self._jwt_expiry = _jwt_expiry(token)
-        # Rotate: the refresh token just used is now spent.
-        if rotated := data.get("Refresh_token"):
-            self._refresh_token = rotated
 
     async def _ensure_token(self) -> None:
         """Guarantee a usable JWT, re-logging-in / refreshing as needed.

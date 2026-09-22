@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versioning is [SemVer](https://semver.org/).
 
+## [0.1.1] - 2026-09-22
+
+### Fixed
+- **Authentication broke against the live portal.** ESW changed the
+  `GetSmartAuthToken` contract: it now seeds the smart JWT from the login
+  response's `access_token` (sent as `access_Token`), and the old
+  `refresh_token`/`refresh_Token` pairing returns `null`. The smart response's
+  rotated `Refresh_token` is also no longer accepted for a subsequent refresh,
+  so each JWT refresh now re-seeds from the (session-reusable) login access
+  token. Verified end-to-end against the live API. Updated `docs/api.md`.
+
 ## [0.1.0] - 2026-07-22
 
 ### Added

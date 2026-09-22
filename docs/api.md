@@ -30,8 +30,9 @@ under `https://www.eswater.co.uk/api/`. Identity is handled by **LoginRadius**
    {
      "RestException": null, "OtherException": null,
      "Response": {
-       "access_token": "<uuid>",
-       "refresh_token": "<uuid>",           // seed for GetSmartAuthToken
+       "access_token": "<uuid>",            // seed for GetSmartAuthToken (as of 2026-09)
+       "refresh_token": "<uuid>",           // (was the seed pre-2026-09; now unused)
+       "session_token": "<uuid>",           // present since 2026-09
        "expires_in": "2026-07-22T16:02:45Z",  // ~1 hour
        "Profile": { "CustomFields": { "PersonId": "PersonId" } }
        /* + Email, FirstName, Surname, Roles … (PII — do not log/persist) */
@@ -49,14 +50,14 @@ under `https://www.eswater.co.uk/api/`. Identity is handled by **LoginRadius**
 The usage endpoints return **401** unless the session is set up in this exact
 order *before* fetching the smart token:
 
-1. `POST /api/Auth/Login {email, password}` → read `Response.refresh_token`.
+1. `POST /api/Auth/Login {email, password}` → read `Response.access_token`.
 2. `POST /api/Auth/SaveUserProfile` with the whole `Response` object — registers
    the profile in the session. Without it, `GetAccountSummary` returns
    `{"statusField": {"codeField": 400, "messageField": "PersonId is required"}}`.
 3. `GET /api/Customer/GetAccountSummary?personId=PersonId` — **binds the account
    to the session**. This is the non-obvious step: skipping it makes usage 401
    even with a valid JWT (`AddOrUpdateCustomerSession` does *not* substitute).
-4. `POST /api/Customer/GetSmartAuthToken {refresh_Token}` → `Id_token` (JWT).
+4. `POST /api/Customer/GetSmartAuthToken {access_Token}` → `Id_token` (JWT).
 5. Usage calls now succeed.
 
 No LoginRadius apikey and **no call to `api.loginradius.com`** is needed — the
@@ -64,13 +65,18 @@ server does that internally. (The JWT is LoginRadius-issued:
 `iss = cloud-api.loginradius.com/sso/oidc/northumbrianwater`,
 `aud = f62c1509-d0c0-4ebf-8f0d-ed2e71d5c3a3`, `PersonId`, **~10 min** lifetime.)
 
-### Token refresh & rotation (verified)
-- The `GetSmartAuthToken` **refresh token is single-use** and **rotates**: each
-  call returns a new `Refresh_token`; reusing a spent one returns `null`. Store
-  the returned `Refresh_token` for the next refresh.
-- Within a live session, a repeat `GetSmartAuthToken` (using the rotated token)
-  works **without** re-running steps 1–3, and its JWT authorises usage.
-- Lifetimes: login `refresh_token` ~1 hour (re-login after); JWT ~10 min
+### Token refresh (verified 2026-09-22)
+- Seed `GetSmartAuthToken` with the login `Response.access_token`, sent as
+  `access_Token`. This access token is **reusable** for the life of the session:
+  repeat `GetSmartAuthToken` calls with it (without re-running steps 1–3) return
+  fresh JWTs that authorise usage.
+- The smart response still contains a `Refresh_token`, but the portal **no
+  longer accepts it** for a subsequent refresh (returns `null`) — do not rotate;
+  always re-seed from the login access token.
+- **History:** pre-2026-09 the seed was `Response.refresh_token` sent as
+  `refresh_Token`, and that token was single-use/rotating. ESW changed this
+  around 2026-09; the old pairing now returns `null`.
+- Lifetimes: login session ~1 hour (`expires_in`; re-login after); JWT ~10 min
   (re-fetch before expiry).
 
 ## Common request conventions
@@ -143,10 +149,12 @@ where **`BadgeNumber` is the `MeterSerial`** used by the usage calls:
 > for usage; do not persist PII.
 
 ### `POST /api/Customer/GetSmartAuthToken`  ← smart JWT
-Request:
+Request (seed with the login `Response.access_token`):
 ```json
-{ "refresh_Token": "<REFRESH_TOKEN>" }
+{ "access_Token": "<ACCESS_TOKEN>" }
 ```
+A `null` response body (HTTP 200 `text/plain`) means the seed was rejected —
+e.g. the old `refresh_Token` pairing, retired around 2026-09.
 Response (`text/plain` JSON):
 ```json
 {

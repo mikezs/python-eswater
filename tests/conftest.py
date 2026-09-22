@@ -43,6 +43,7 @@ async def client(session: aiohttp.ClientSession) -> ESWaterClient:
     c = ESWaterClient(session, "you@example.com", "password", base_url="https://api.test")
     c._authenticated = True  # noqa: SLF001
     c._refresh_token = "seed-refresh-token"  # noqa: SLF001
+    c._access_token = "seed-access-token"  # noqa: SLF001
     c._profile_expiry = datetime.now(UTC) + timedelta(hours=1)  # noqa: SLF001
     c._jwt = make_jwt(exp=datetime.now(UTC) + timedelta(minutes=10))  # noqa: SLF001
     c._jwt_expiry = datetime.now(UTC) + timedelta(minutes=10)  # noqa: SLF001

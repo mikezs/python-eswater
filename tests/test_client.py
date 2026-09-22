@@ -109,7 +109,11 @@ async def test_authenticate_full_sequence(session: aiohttp.ClientSession) -> Non
     login_body = {
         "RestException": None,
         "OtherException": None,
-        "Response": {"refresh_token": "seed123", "expires_in": "2099-01-01T00:00:00Z"},
+        "Response": {
+            "access_token": "seed123",
+            "refresh_token": "unused",
+            "expires_in": "2099-01-01T00:00:00Z",
+        },
     }
     c = ESWaterClient(session, "u", "p", base_url="https://api.test")
     calls: list[str] = []
@@ -119,7 +123,8 @@ async def test_authenticate_full_sequence(session: aiohttp.ClientSession) -> Non
         if "Auth/Login" in path:
             return login_body
         if "GetSmartAuthToken" in path:
-            assert kwargs["json_body"] == {"refresh_Token": "seed123"}
+            # Seeded with the login access_token, sent as access_Token.
+            assert kwargs["json_body"] == {"access_Token": "seed123"}
             return {"Id_token": jwt, "Refresh_token": "rotated456"}
         return None  # SaveUserProfile / GetAccountSummary
 
@@ -128,8 +133,8 @@ async def test_authenticate_full_sequence(session: aiohttp.ClientSession) -> Non
 
     assert c._authenticated is True  # noqa: SLF001
     assert c._jwt == jwt  # noqa: SLF001
-    # refresh token rotated to the value returned by GetSmartAuthToken
-    assert c._refresh_token == "rotated456"  # noqa: SLF001
+    # access token stored as the smart-token seed for subsequent refreshes
+    assert c._access_token == "seed123"  # noqa: SLF001
     # required order: SaveUserProfile + GetAccountSummary precede the smart token
     login_i = next(i for i, p in enumerate(calls) if "Auth/Login" in p)
     save_i = next(i for i, p in enumerate(calls) if "SaveUserProfile" in p)
@@ -151,43 +156,33 @@ async def test_authenticate_login_failure_raises(session: aiohttp.ClientSession)
         await c.authenticate()
 
 
-async def test_authenticate_missing_refresh_token_raises(
+async def test_authenticate_missing_access_token_raises(
     session: aiohttp.ClientSession,
 ) -> None:
     c = ESWaterClient(session, "u", "p", base_url="https://api.test")
 
     async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
-        return {"Response": {"expires_in": "2099-01-01T00:00:00Z"}}  # no refresh_token
+        return {"Response": {"expires_in": "2099-01-01T00:00:00Z"}}  # no access_token
 
     c._request = fake_request  # type: ignore[method-assign]  # noqa: SLF001
     with pytest.raises(InvalidAuth):
         await c.authenticate()
 
 
-async def test_refresh_token_rotates(client: ESWaterClient) -> None:
-    client._refresh_token = "old"  # noqa: SLF001
+async def test_refresh_reseeds_from_access_token(client: ESWaterClient) -> None:
+    """Each refresh re-seeds from the stored login access token (no rotation)."""
+    client._access_token = "seed"  # noqa: SLF001
     jwt = make_jwt(exp=datetime.now(UTC) + timedelta(minutes=10))
 
     async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
-        assert kwargs["json_body"] == {"refresh_Token": "old"}
-        return {"Id_token": jwt, "Refresh_token": "new"}
+        assert kwargs["json_body"] == {"access_Token": "seed"}
+        return {"Id_token": jwt, "Refresh_token": "ignored"}
 
     client._request = fake_request  # type: ignore[method-assign]  # noqa: SLF001
     await client.refresh()
-    assert client._refresh_token == "new"  # noqa: SLF001
+    # The returned Refresh_token is not adopted; the access-token seed persists.
+    assert client._access_token == "seed"  # noqa: SLF001
     assert client._jwt == jwt  # noqa: SLF001
-
-
-async def test_refresh_token_keeps_old_when_none_returned(client: ESWaterClient) -> None:
-    client._refresh_token = "keep"  # noqa: SLF001
-    jwt = make_jwt(exp=datetime.now(UTC) + timedelta(minutes=10))
-
-    async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
-        return {"Id_token": jwt}  # no Refresh_token in response
-
-    client._request = fake_request  # type: ignore[method-assign]  # noqa: SLF001
-    await client.refresh()
-    assert client._refresh_token == "keep"  # noqa: SLF001
 
 
 # --- data endpoints --------------------------------------------------------
