@@ -5,6 +5,11 @@
 
 version: 2
 updates:
+  # Keep workflow actions current (e.g. checkout/setup-python/artifact bumps).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: "pip"
     directory: "/" # Location of package manifests
     schedule:
