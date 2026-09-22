@@ -117,6 +117,20 @@ Account/premise discovery entry point.
 > Note: the portal often sends `personId=PersonId` literally (a placeholder);
 > the server resolves the person from the session cookie.
 
+### `POST /api/Customer/AddOrUpdateCustomerSession`  ← selects the account for GetAccountDetails
+Request:
+```json
+["PersonId:PersonId", "AccountId:<ACCOUNT_ID>"]
+```
+Response: `true`.
+
+> The portal session holds exactly one "current" account at a time (bound to
+> whichever account `GetAccountSummary` last saw, i.e. the first one after
+> login). For a person with multiple accounts, `GetAccountDetails` scopes its
+> `Account`/`Meters` fields to whatever account is currently selected. Call
+> this immediately before each `GetAccountDetails` to re-bind first, or every
+> account after the first comes back with those fields `null`.
+
 ### `POST /api/Customer/GetAccountDetails`  ← meter discovery
 Request:
 ```json
@@ -213,7 +227,6 @@ Observed windowing behaviour:
 - `POST /api/Customer/GetWaterUsageEfficiency`
 - `POST /api/Customer/GetSmartMeterAlertStatus` — leak/alert status
 - `GET  /api/Customer/GetUsageComparison?noOfOccupiers=&lastYearAvgUsage=`
-- `POST /api/Customer/AddOrUpdateCustomerSession` — body `["PersonId:…","AccountId:…"]` → `true`
 - `POST /api/Auth/SaveUserProfile` — empty response
 - `POST /api/BillsPayments/GetBillsPayments`, `GET /api/BillsPayments/GetPaymentPlan?accountId=`
 
@@ -222,11 +235,15 @@ Observed windowing behaviour:
 2. `POST /api/Auth/SaveUserProfile` (whole `Response` object)
 3. `GET  /api/Customer/GetAccountSummary?personId=PersonId` (binds session)
 4. `POST /api/Customer/GetSmartAuthToken {refresh_Token}` → JWT (+ rotated token)
-5. `POST /api/Customer/GetAccountDetails` → meter `BadgeNumber` (serial)
+5. For each account: `POST /api/Customer/AddOrUpdateCustomerSession` (re-binds
+   the session to that account) → `POST /api/Customer/GetAccountDetails` →
+   meter `BadgeNumber` (serial)
 6. `POST /api/Customer/Get…WaterUsage` (JWT in body + serial) → readings
 
-`AddOrUpdateCustomerSession` and `GetAccountDetails` order-relative-to-token do
-not matter for auth; only steps 2 and 3 must precede step 4.
+`AddOrUpdateCustomerSession`'s order relative to the token doesn't matter for
+auth; only steps 2 and 3 must precede step 4. But it does matter relative to
+`GetAccountDetails`: it must immediately precede each call, per account (see
+above). Otherwise only the account bound by step 3 returns real data.
 
 ## Gotchas
 - Cloudflare + reCAPTCHA sit on the **login page**; the LoginRadius API login
