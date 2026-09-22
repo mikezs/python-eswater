@@ -234,7 +234,7 @@ Observed windowing behaviour:
 1. `POST /api/Auth/Login` → read `Response.refresh_token` from the body
 2. `POST /api/Auth/SaveUserProfile` (whole `Response` object)
 3. `GET  /api/Customer/GetAccountSummary?personId=PersonId` (binds session)
-4. `POST /api/Customer/GetSmartAuthToken {refresh_Token}` → JWT (+ rotated token)
+4. `POST /api/Customer/GetSmartAuthToken {access_Token}` → JWT
 5. For each account: `POST /api/Customer/AddOrUpdateCustomerSession` (re-binds
    the session to that account) → `POST /api/Customer/GetAccountDetails` →
    meter `BadgeNumber` (serial)

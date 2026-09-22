@@ -3,6 +3,22 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versioning is [SemVer](https://semver.org/).
 
+## [0.1.2] - 2026-09-22
+
+### Fixed
+- **Multi-account logins crashed** with `Could not parse account response:
+  'NoneType' object is not iterable`. The portal binds one account at a time, so
+  `GetAccountDetails` returned null `Account`/`Meters` for every account except
+  the one bound at login. Now re-bind via `AddOrUpdateCustomerSession` before
+  each `GetAccountDetails`, and tolerate explicit JSON `null` in account parsing.
+  (#3, thanks @corautem)
+
+### Added
+- **Auth-ladder fallback:** if a smart-token refresh fails with `ApiError` /
+  `InvalidAuth` / `NotAuthenticated`, fall back to a full re-login instead of
+  surfacing the error; transient `ServiceUnavailable` still propagates to the
+  caller's retry/backoff. (#4, thanks @corautem)
+
 ## [0.1.1] - 2026-09-22
 
 ### Fixed

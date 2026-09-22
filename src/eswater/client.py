@@ -215,8 +215,8 @@ class ESWaterClient:
                 try:
                     await self._do_refresh_token()
                 except (ApiError, InvalidAuth, NotAuthenticated):
-                    # The rotating refresh token can desync/go stale
-                    # independently of the broader session; fall back to a
+                    # The stored access-token seed / portal session can go
+                    # stale independently of our tracked expiry; fall back to a
                     # full re-login rather than surfacing a failure a fresh
                     # authenticate() would recover from.
                     await self._do_authenticate()

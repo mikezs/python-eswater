@@ -420,8 +420,8 @@ async def test_ensure_token_reauthenticates_when_profile_expired(
 async def test_ensure_token_falls_back_to_full_reauth_when_refresh_fails(
     client: ESWaterClient,
 ) -> None:
-    """A failing token refresh (e.g. a desynced/stale rotating refresh
-    token) falls back to a full re-login instead of surfacing the failure.
+    """A failing token refresh (e.g. a stale access-token seed / portal
+    session) falls back to a full re-login instead of surfacing the failure.
     """
     client._jwt = None  # noqa: SLF001 - force a refresh attempt
     reauthed: list[bool] = []

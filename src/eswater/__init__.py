@@ -12,7 +12,7 @@ from .exceptions import (
 )
 from .models import Account, Granularity, Meter, UsageReading
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = [
     "ESWaterClient",
