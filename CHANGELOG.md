@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versioning is [SemVer](https://semver.org/).
 
+## [0.1.3] - 2026-09-22
+
+### Changed
+- Replaced the sample account/premise/meter identifiers in test fixtures, docs,
+  and CLI examples with obviously-fake placeholders, and stopped shipping the
+  `tests/` directory in the sdist. (No functional/API changes.) Git history was
+  also rewritten to purge the earlier sample values; releases 0.1.0–0.1.2 were
+  removed from PyPI as part of this cleanup — use 0.1.3+.
+
 ## [0.1.2] - 2026-09-22
 
 ### Fixed
