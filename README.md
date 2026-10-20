@@ -98,6 +98,11 @@ mypy src
 pytest
 ```
 
+To release, update the version in `pyproject.toml` and `src/eswater/__init__.py`
+and add a changelog entry. Commit, wait for CI, then push the matching `vX.Y.Z`
+tag. The Release workflow validates and builds the tag, publishes using PyPI
+trusted publishing, and creates the GitHub release using the built-in token.
+
 ## Disclaimer
 
 Not affiliated with or endorsed by Essex & Suffolk Water or Northumbrian Water

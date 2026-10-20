@@ -1,18 +1,10 @@
 name: Release
 
-# One-click release: pick a bump, and this bumps the version, commits it to
-# main, tags it, builds, publishes to PyPI (OIDC trusted publishing), and cuts
-# a GitHub release. Pushes use RELEASE_TOKEN (a fine-grained PAT owned by the
-# repo admin) so they bypass the branch ruleset's required checks.
-
+# Bump and commit the version locally, then push a vX.Y.Z tag. Publishing uses
+# GitHub's built-in token and PyPI trusted publishing; no personal token needed.
 on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        description: Semantic version bump
-        type: choice
-        options: [patch, minor, major]
-        default: patch
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -21,67 +13,34 @@ jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # PyPI trusted publishing
-      contents: read
+      id-token: write
+      contents: write
     steps:
       - uses: actions/checkout@v7
-        with:
-          token: ${{ secrets.RELEASE_TOKEN }}
-          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-
-      - name: Configure git identity
+      - name: Verify tag matches package version
         run: |
-          git config user.name "mikezs"
-          git config user.email "mikezs@users.noreply.github.com"
-
-      - name: Compute new version
-        id: ver
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          assert os.environ["GITHUB_REF_NAME"] == f"v{version}"
+          assert f'__version__ = "{version}"' in Path("src/eswater/__init__.py").read_text()
+          PY
+      - name: Validate and build
         run: |
-          cur=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          IFS=. read -r MA MI PA <<< "$cur"
-          case "${{ inputs.bump }}" in
-            major) MA=$((MA+1)); MI=0; PA=0 ;;
-            minor) MI=$((MI+1)); PA=0 ;;
-            patch) PA=$((PA+1)) ;;
-          esac
-          new="$MA.$MI.$PA"
-          echo "new=$new" >> "$GITHUB_OUTPUT"
-          echo "Bumping $cur -> $new"
-
-      - name: Apply version
-        run: |
-          new="${{ steps.ver.outputs.new }}"
-          sed -i -E "s/^version = \"[^\"]*\"/version = \"$new\"/" pyproject.toml
-          sed -i -E "s/^__version__ = \"[^\"]*\"/__version__ = \"$new\"/" src/eswater/__init__.py
-          grep -q "version = \"$new\"" pyproject.toml
-          grep -q "__version__ = \"$new\"" src/eswater/__init__.py
-
-      - name: Build and check
-        run: |
-          python -m pip install --upgrade build twine
+          python -m pip install -e '.[dev]' build twine
+          ruff check .
+          mypy src
+          pytest -v --cov --cov-report=term-missing --cov-fail-under=90
           python -m build
           twine check dist/*
-
-      - name: Commit, tag, push
-        run: |
-          new="${{ steps.ver.outputs.new }}"
-          git add pyproject.toml src/eswater/__init__.py
-          git commit -m "Release $new"
-          git tag -a "v$new" -m "eswater $new"
-          git push origin HEAD:main
-          git push origin "v$new"
-
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-
       - name: Create GitHub release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: >
-          gh release create "v${{ steps.ver.outputs.new }}"
-          --title "${{ steps.ver.outputs.new }}"
-          --generate-notes
-          dist/*
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "${GITHUB_REF_NAME#v}" --generate-notes dist/*
