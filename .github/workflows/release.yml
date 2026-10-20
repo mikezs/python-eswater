@@ -1,16 +1,144 @@
 name: Release
 
-# Bump and commit the version locally, then push a vX.Y.Z tag. Publishing uses
-# GitHub's built-in token and PyPI trusted publishing; no personal token needed.
+# The manual entry point prepares a release using RELEASE_TOKEN so its pushes
+# trigger CI and the tag publisher. Publishing itself uses GITHUB_TOKEN/OIDC.
 on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semantic version bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      dry_run:
+        description: Validate the token and proposed release without pushing or publishing
+        type: boolean
+        default: true
   push:
     tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check branch and release token
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/main || { echo "::error::Run releases from main"; exit 1; }
+          test -n "$GH_TOKEN" || { echo "::error::Set the RELEASE_TOKEN Actions secret; see README.md"; exit 1; }
+          actor=$(gh api user --jq .login)
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .permissions.push)" = true || { echo "::error::RELEASE_TOKEN needs Contents: read and write"; exit 1; }
+          echo "Release token authenticated as $actor"
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          token: ${{ secrets.RELEASE_TOKEN }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Prepare version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+          path = Path("pyproject.toml")
+          text = path.read_text()
+          current = tomllib.loads(text)["project"]["version"]
+          if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", current):
+              raise SystemExit("Expected a stable MAJOR.MINOR.PATCH version")
+          parts = list(map(int, current.split(".")))
+          index = {"major": 0, "minor": 1, "patch": 2}[os.environ["BUMP"]]
+          parts[index] += 1
+          parts[index + 1:] = [0] * (2 - index)
+          new = ".".join(map(str, parts))
+          updated, count = re.subn(r'^version = "' + re.escape(current) + r'"$', f'version = "{new}"', text, flags=re.M)
+          if count != 1:
+              raise SystemExit("Package version declaration was not unique")
+          init = Path("src/eswater/__init__.py")
+          init_updated, count = re.subn(r'^__version__ = "' + re.escape(current) + r'"$', f'__version__ = "{new}"', init.read_text(), flags=re.M)
+          if count != 1:
+              raise SystemExit("Runtime version does not match package version")
+          path.write_text(updated)
+          init.write_text(init_updated)
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              output.write(f"new={new}\n")
+          print(f"Prepared {current} -> {new}")
+          PY
+      - name: Validate and build proposed release
+        run: |
+          python -m pip install -e '.[dev]' build twine
+          ruff check .
+          mypy src
+          pytest -v --cov --cov-report=term-missing --cov-fail-under=90
+          python -m build
+          twine check dist/*
+      - name: Prepare commit and verify push authentication
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+        run: |
+          test -z "$(git tag --list "v$NEW_VERSION")" || { echo "::error::Release tag already exists"; exit 1; }
+          git config user.name "mikezs"
+          git config user.email "mikezs@users.noreply.github.com"
+          git add pyproject.toml src/eswater/__init__.py
+          git diff --cached --check
+          git commit -m "Release $NEW_VERSION"
+          git push --dry-run origin HEAD:main
+      - name: Push release commit
+        if: ${{ !inputs.dry_run }}
+        run: git push origin HEAD:main
+      - name: Wait for CI on the exact release commit
+        if: ${{ !inputs.dry_run }}
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          while true; do
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event push --branch main --commit "$sha" --json status,conclusion,url)
+            status=$(jq -r '.[0].status // "pending"' <<< "$runs")
+            if [ "$status" = completed ]; then
+              test "$(jq -r '.[0].conclusion' <<< "$runs")" = success || { echo "::error::Release commit failed CI"; exit 1; }
+              break
+            fi
+            sleep 10
+          done
+      - name: Tag the checked release commit
+        if: ${{ !inputs.dry_run }}
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+        run: |
+          git tag -a "v$NEW_VERSION" -m "eswater $NEW_VERSION"
+          git push origin "refs/tags/v$NEW_VERSION"
+      - name: Release summary
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            echo "Dry run passed for v$NEW_VERSION: token, proposed version, tests and build validated. No remote changes." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Pushed v$NEW_VERSION after CI passed. The tag-triggered Release run will publish to PyPI and GitHub." >> "$GITHUB_STEP_SUMMARY"
+          fi
   release:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       id-token: write

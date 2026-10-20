@@ -98,10 +98,44 @@ mypy src
 pytest
 ```
 
-To release, update the version in `pyproject.toml` and `src/eswater/__init__.py`
-and add a changelog entry. Commit, wait for CI, then push the matching `vX.Y.Z`
-tag. The Release workflow validates and builds the tag, publishes using PyPI
-trusted publishing, and creates the GitHub release using the built-in token.
+## Releasing
+
+Open **Actions → Release → Run workflow** on **main**. Choose `patch`, `minor`
+or `major`. Leave **dry_run** checked to validate the proposed version, token,
+tests and package build without changing GitHub or publishing. Uncheck it to
+release. Add the relevant changelog notes before running a real release.
+
+The manual workflow updates `pyproject.toml` and `src/eswater/__init__.py`,
+validates/builds, commits the version bump, waits for CI on that exact commit,
+then pushes its version tag. The tag-triggered run of the same workflow validates
+again, publishes through **PyPI trusted publishing**, and creates the GitHub
+release. There is no PyPI API token to configure. Manual version commits and
+matching `vX.Y.Z` tags still work.
+
+### Release token
+
+Create a **fine-grained personal access token** owned by `mikezs`, with access
+only to `python-eswater` and `ha-essex-suffolk-water`, **Contents: read and write**
+and the automatically included Metadata read permission. Save it as the repository
+Actions secret **`RELEASE_TOKEN`** in both repositories (Settings → Secrets and
+variables → Actions). Renew/replace the secret when the token expires; never put
+the value in source code or workflow inputs. Workflows write permission is not
+needed: the release commit changes version files, not workflow files.
+
+The token's owner must retain the admin-role bypass already configured in each
+repository's `main-ci` ruleset: a new version commit has no CI results until it
+has been pushed. The workflow checks its tests before pushing and waits for the
+remote CI result before tagging. A failed/timed-out CI run leaves a version commit
+on main but creates no tag or release; inspect/fix it before preparing another
+release, or tag that exact commit manually once its checks pass.
+
+`RELEASE_TOKEN` is used only for the manual workflow's checkout/git pushes (and
+the initial authentication check). Unlike pushes using `GITHUB_TOKEN`, these
+pushes trigger the CI and tag-release workflows. The built-in token has
+`actions: read` to wait for CI, and is used with `contents: write` only in the
+tag publisher to create the GitHub release; PyPI uses OIDC. The dry run also
+tests Git push authentication with `git push --dry-run`; it does not prove a real
+protected-branch update, which still depends on the owner's configured bypass.
 
 ## Disclaimer
 
