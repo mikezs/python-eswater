@@ -61,7 +61,7 @@ def test_parse_dt_valid() -> None:
     assert _parse_dt("2026-07-18T01:00:00") == datetime(2026, 7, 18, 1, 0, 0)
 
 
-@pytest.mark.parametrize("value", [None, "abc", object()])
+@pytest.mark.parametrize("value", [None, "abc", object(), 10**1000])
 def test_parse_float_returns_none_on_bad_input(value: object) -> None:
     assert _parse_float(value) is None
 
@@ -79,3 +79,23 @@ def test_apply_details_handles_no_meters() -> None:
     account.apply_details({"Account": {}, "Meters": []})
     assert account.meters == []
     assert account.is_smart is False
+
+
+@pytest.mark.parametrize("value", [None, "bad", "NaN", "Infinity", "-Infinity"])
+def test_usage_rejects_invalid_consumption(value: object) -> None:
+    with pytest.raises(ValueError, match="LitreValue"):
+        UsageReading.from_api({"Date": "2026-07-18", "LitreValue": value})
+
+
+def test_usage_zero_and_missing_cost_are_valid() -> None:
+    reading = UsageReading.from_api({"Date": "2026-07-18", "LitreValue": 0})
+    assert reading.consumption_litres == 0
+    assert reading.cost is None
+
+
+@pytest.mark.parametrize("value", ["bad", "NaN", "Infinity"])
+def test_usage_rejects_invalid_cost(value: object) -> None:
+    with pytest.raises(ValueError, match="MonetaryValue"):
+        UsageReading.from_api(
+            {"Date": "2026-07-18", "LitreValue": 1, "MonetaryValue": value}
+        )

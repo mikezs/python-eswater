@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versioning is [SemVer](https://semver.org/).
 
+## [0.1.4] - 2026-10-20
+
+### Fixed
+- Renew expired login sessions before account/meter discovery, not only usage calls.
+- Clear stale auth state on re-login and mark authentication complete only after
+  the smart JWT is fetched successfully.
+- Map malformed JSON, account envelopes, usage rows and tokens to typed errors;
+  reject invalid/non-finite consumption and cost rather than storing bogus zeroes.
+- Treat the portal's JSON-null usage response as an empty day.
+- Remove raw response bodies and account payloads from public error messages.
+
+### Added
+- Dedicated-session ownership guidance and real local HTTP/cookie regression tests.
+
 ## [0.1.3] - 2026-09-22
 
 ### Changed

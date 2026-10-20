@@ -52,6 +52,12 @@ Consumption is in **litres** and cost in **GBP**, both provided by the API.
 The smart-usage JWT (~10 min) is refreshed automatically; the login session
 (~1 hour) is re-established on expiry.
 
+Give each client its **own `aiohttp.ClientSession`**: authentication cookies and
+selected-account state belong to that client. The caller owns the session and
+must close it (as in the example above); the client's context manager only
+authenticates and does not close a caller-owned session. In Home Assistant, use
+`async_create_clientsession(hass)`, not the shared `async_get_clientsession`.
+
 > **Timestamps are naive local (UK) time**, exactly as the API returns them —
 > `UsageReading.timestamp` carries no `tzinfo`. Convert to your own zone before
 > use (e.g. attach `ZoneInfo("Europe/London")`); don't assume UTC, or readings

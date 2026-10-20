@@ -8,6 +8,8 @@ to return captured fixture payloads and to assert the request bodies sent.
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 from datetime import UTC, datetime, timedelta
 from types import TracebackType
 from typing import Any
@@ -581,3 +583,81 @@ def test_parse_profile_expiry_naive_gets_utc() -> None:
 def test_expired_true_and_false() -> None:
     assert _expired(datetime.now(UTC) - timedelta(seconds=1), margin=0) is True
     assert _expired(datetime.now(UTC) + timedelta(hours=1), margin=30) is False
+
+
+@pytest.mark.parametrize("payload", [[], None, "bad", {"exp": None}, {"exp": 10**100}])
+def test_jwt_expiry_rejects_malformed_claims(payload: Any) -> None:
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    assert _jwt_expiry(f"header.{encoded}.sig") is None
+
+
+@pytest.mark.parametrize("response", ["bad", ["bad"], {"access_token": 42}])
+async def test_malformed_login_is_invalid_auth(
+    client: ESWaterClient, response: Any
+) -> None:
+    async def fake_request(*_args: Any, **_kwargs: Any) -> Any:
+        return {"Response": response}
+
+    client._request = fake_request  # type: ignore[method-assign]
+    with pytest.raises(InvalidAuth):
+        await client.authenticate()
+    assert not client._authenticated
+    assert client._jwt is None
+
+
+async def test_failed_initial_token_leaves_client_unauthenticated(
+    client: ESWaterClient,
+) -> None:
+    async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
+        if "Login" in path:
+            return {"Response": {"access_token": "seed"}}
+        if "GetSmartAuthToken" in path:
+            return {"Id_token": ["not-a-token"]}
+        return None
+
+    client._request = fake_request  # type: ignore[method-assign]
+    with pytest.raises(ApiError):
+        await client.authenticate()
+    assert not client._authenticated
+
+
+async def test_get_accounts_recovers_expired_profile(client: ESWaterClient) -> None:
+    client._profile_expiry = datetime.now(UTC) - timedelta(seconds=1)
+    reauthed = False
+
+    async def fake_auth() -> None:
+        nonlocal reauthed
+        reauthed = True
+
+    async def fake_request(*_args: Any, **_kwargs: Any) -> Any:
+        assert reauthed, "account request ran before renewing the expired session"
+        return {"Accounts": []}
+
+    client._do_authenticate = fake_auth  # type: ignore[method-assign]
+    client._request = fake_request  # type: ignore[method-assign]
+    assert await client.get_accounts() == []
+
+
+@pytest.mark.parametrize("rows", [None, [None], [{"Date": "2026-07-18", "LitreValue": "NaN"}]])
+async def test_usage_empty_and_malformed_rows(client: ESWaterClient, rows: Any) -> None:
+    async def fake_request(*_args: Any, **_kwargs: Any) -> Any:
+        return rows
+
+    client._request = fake_request  # type: ignore[method-assign]
+    if rows is None:
+        assert await client.get_usage("acc", "serial", datetime(2026, 7, 18)) == []
+    else:
+        with pytest.raises(ApiError):
+            await client.get_usage("acc", "serial", datetime(2026, 7, 18))
+
+
+@pytest.mark.parametrize("summary", [None, {}, {"Accounts": [{"AccountID": "1"}]}])
+async def test_missing_account_envelopes_are_not_empty_accounts(
+    client: ESWaterClient, summary: Any
+) -> None:
+    async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
+        return summary if "GetAccountSummary" in path else {}
+
+    client._request = fake_request  # type: ignore[method-assign]
+    with pytest.raises(ApiError):
+        await client.get_accounts()

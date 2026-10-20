@@ -54,12 +54,15 @@ def _jwt_expiry(token: str) -> datetime | None:
         payload += "=" * (-len(payload) % 4)
         claims = json.loads(base64.urlsafe_b64decode(payload))
         return datetime.fromtimestamp(int(claims["exp"]), tz=UTC)
-    except (IndexError, KeyError, ValueError, binascii.Error, json.JSONDecodeError):
+    except (IndexError, KeyError, ValueError, TypeError, OverflowError, binascii.Error):
         return None
 
 
 class ESWaterClient:
     """Client for retrieving Essex & Suffolk Water smart meter data.
+
+    The caller owns and closes ``session``. Give each client a dedicated session:
+    the portal stores login and selected-account state in its cookie jar.
 
     Example
     -------
@@ -140,18 +143,24 @@ class ESWaterClient:
 
     async def _do_authenticate(self) -> None:
         """Login sequence. Caller must hold ``self._auth_lock``."""
+        self._authenticated = False
+        self._jwt = None
+        self._jwt_expiry = None
+        self._access_token = None
         data = await self._request(
             "POST",
             LOGIN_PATH,
             json_body={"email": self._username, "password": self._password},
         )
         response = data.get("Response") if isinstance(data, dict) else None
-        if not response or data.get("RestException") or data.get("OtherException"):
+        if not isinstance(response, dict) or not response or (
+            data.get("RestException") or data.get("OtherException")
+        ):
             raise InvalidAuth("Login failed (check credentials).")
 
         self._refresh_token = response.get("refresh_token")
         self._access_token = response.get("access_token")
-        if not self._access_token:
+        if not isinstance(self._access_token, str) or not self._access_token:
             raise InvalidAuth("Login succeeded but no access_token in response.")
 
         # Register the profile, then establish account context in the session.
@@ -162,9 +171,8 @@ class ESWaterClient:
         )
 
         self._profile_expiry = _parse_profile_expiry(response.get("expires_in"))
-        self._authenticated = True
-
         await self._do_refresh_token()
+        self._authenticated = True
 
     async def refresh(self) -> None:
         """Fetch a fresh smart-usage JWT, re-seeding from the login access token.
@@ -191,7 +199,7 @@ class ESWaterClient:
             json_body={"access_Token": self._access_token},
         )
         token = data.get("Id_token") if isinstance(data, dict) else None
-        if not token:
+        if not isinstance(token, str) or not token:
             raise ApiError("GetSmartAuthToken returned no Id_token.")
         self._jwt = token
         self._jwt_expiry = _jwt_expiry(token)
@@ -225,12 +233,13 @@ class ESWaterClient:
 
     async def get_accounts(self) -> list[Account]:
         """Return all billing accounts, each populated with its meters."""
-        if not self._authenticated:
-            raise NotAuthenticated("Call authenticate() before making requests.")
+        await self._ensure_token()
         summary = await self._request(
             "GET", ACCOUNT_SUMMARY_PATH, params={"personId": "PersonId"}
         )
         try:
+            if not isinstance(summary, dict) or "Accounts" not in summary:
+                raise ValueError("Missing Accounts field.")
             accounts = [Account.from_summary(a) for a in summary.get("Accounts") or []]
             for account in accounts:
                 # The portal session is bound to a single account at a time
@@ -251,9 +260,11 @@ class ESWaterClient:
                         "PersonId": "PersonId",
                     },
                 )
+                if not isinstance(detail, dict) or "AccountDetail" not in detail:
+                    raise ValueError("Missing AccountDetail field.")
                 account.apply_details(detail.get("AccountDetail") or {})
         except (KeyError, ValueError, TypeError, AttributeError) as err:
-            raise ApiError(f"Could not parse account response: {err}") from err
+            raise ApiError("Could not parse account response.") from err
         return accounts
 
     async def get_meters(self) -> list[Meter]:
@@ -292,12 +303,15 @@ class ESWaterClient:
                 "StartDate": start_date.strftime(_USAGE_DATE_FMT),
             },
         )
+        # The portal returns JSON null for some days before the meter was active.
+        if readings is None:
+            return []
         if not isinstance(readings, list):
-            raise ApiError(f"Unexpected usage payload: {readings!r}")
+            raise ApiError("Unexpected usage payload (expected a list).")
         try:
             return [UsageReading.from_api(r) for r in readings]
-        except (KeyError, ValueError, TypeError) as err:
-            raise ApiError(f"Could not parse usage response: {err}") from err
+        except (KeyError, ValueError, TypeError, AttributeError) as err:
+            raise ApiError("Could not parse usage response.") from err
 
     async def get_meter_usage(
         self,
@@ -354,11 +368,13 @@ class ESWaterClient:
                 if resp.status >= 500:
                     raise ServiceUnavailable(f"Upstream error {resp.status}.")
                 if resp.status >= 400:
-                    body = await resp.text()
-                    raise ApiError(f"Unexpected status {resp.status}: {body[:200]}")
+                    raise ApiError(f"Unexpected status {resp.status}.")
                 if not parse_json:
                     return await resp.text()
-                return await resp.json(content_type=None)
+                try:
+                    return await resp.json(content_type=None)
+                except (ValueError, UnicodeError) as err:
+                    raise ApiError("Portal returned invalid JSON.") from err
         except TimeoutError as err:
             raise ServiceUnavailable("Request timed out.") from err
         except aiohttp.ClientError as err:

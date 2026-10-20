@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from math import isfinite
 from typing import Any
 
 
@@ -34,8 +35,9 @@ def _parse_dt(value: Any) -> datetime | None:
 
 def _parse_float(value: Any) -> float | None:
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        number = float(value)
+        return number if isfinite(number) else None
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -123,10 +125,16 @@ class UsageReading:
     def from_api(cls, data: dict[str, Any]) -> UsageReading:
         ts = _parse_dt(data.get("Date"))
         if ts is None:
-            raise ValueError(f"Usage reading missing/invalid Date: {data!r}")
+            raise ValueError("Usage reading missing/invalid Date.")
+        consumption = _parse_float(data.get("LitreValue"))
+        if consumption is None:
+            raise ValueError("Usage reading missing/invalid LitreValue.")
+        cost = _parse_float(data.get("MonetaryValue"))
+        if data.get("MonetaryValue") is not None and cost is None:
+            raise ValueError("Usage reading has invalid MonetaryValue.")
         return cls(
             timestamp=ts,
-            consumption_litres=_parse_float(data.get("LitreValue")) or 0.0,
-            cost=_parse_float(data.get("MonetaryValue")),
+            consumption_litres=consumption,
+            cost=cost,
             reading_type=data.get("ReadingType"),
         )
